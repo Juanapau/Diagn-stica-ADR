@@ -496,7 +496,8 @@
     <div class="fila-form">
       <div class="campo">
         <label for="input-nombre">Nombre completo</label>
-        <input type="text" id="input-nombre" autocomplete="off" placeholder="Escribe tu nombre...">
+        <input type="text" id="input-nombre" name="nombre-estudiante-prueba-adr" autocomplete="off" spellcheck="false" placeholder="Escribe tu nombre...">
+        <input type="text" style="position:absolute; opacity:0; height:0; width:0; pointer-events:none;" tabindex="-1" aria-hidden="true">
         <div class="lista-autocompletar" id="lista-autocompletar"></div>
       </div>
       <div class="campo">
@@ -649,6 +650,11 @@ const $ = (id) => document.getElementById(id);
    INICIALIZACIÓN
    ========================================================================= */
 document.addEventListener("DOMContentLoaded", () => {
+  // Limpia el campo de nombre por si el navegador restauró un valor anterior (autofill/bfcache)
+  $("input-nombre").value = "";
+  nombreSeleccionado = "";
+  $("input-nombre").classList.remove("valido");
+
   $("input-fecha").value = new Date().toISOString().split("T")[0];
   cargarListaEstudiantes();
   configurarAutocompletar($("input-nombre"), $("lista-autocompletar"), (nombre) => {
@@ -695,6 +701,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("btn-ejecutar-resultado").addEventListener("click", ejecutarConsultaResultado);
   $("input-resultado-docente").addEventListener("keydown", (e) => { if(e.key==="Enter") ejecutarConsultaResultado(); });
+});
+
+// Si el navegador restaura la página desde su caché (bfcache) al volver atrás, limpia el campo igualmente.
+window.addEventListener("pageshow", () => {
+  $("input-nombre").value = "";
+  nombreSeleccionado = "";
+  $("input-nombre").classList.remove("valido");
+  validarInicio();
 });
 
 /* =========================================================================
@@ -1015,6 +1029,97 @@ async function ejecutarConsultaResultado() {
     `;
   } catch (err) {
     cont.innerHTML = `<div class="mensaje-estado">Ocurrió un error al consultar la información.</div>`;
+  }
+}
+
+/* =========================================================================
+   ZONA DOCENTE — GENERAR PDF (lista de estudiantes y nivel alcanzado)
+   ========================================================================= */
+async function generarPdfNiveles() {
+  const boton = $("btn-generar-pdf");
+  const textoOriginal = boton.innerHTML;
+
+  if (!apiConfigurada()) {
+    alert("Configura la URL del backend (Apps Script) para habilitar esta función.");
+    return;
+  }
+  if (typeof window.jspdf === "undefined" || typeof window.jspdf.jsPDF === "undefined") {
+    alert("No se pudo cargar la librería para generar el PDF. Verifica tu conexión a internet e inténtalo de nuevo.");
+    return;
+  }
+
+  boton.disabled = true;
+  boton.innerHTML = `<i class="fa-solid fa-spinner spin"></i> Generando...`;
+
+  try {
+    const res = await fetch(`${API_URL}?action=buscar&nombre=`);
+    if (!res.ok) throw new Error(`El servidor respondió con estado ${res.status}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.mensaje || "El servidor no pudo procesar la solicitud.");
+    if (!data.resultados || data.resultados.length === 0) {
+      alert("Todavía no hay resultados registrados para generar el reporte.");
+      return;
+    }
+
+    const resultados = [...data.resultados].sort((a, b) => String(a.nombre).localeCompare(String(b.nombre)));
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+
+    if (typeof doc.autoTable !== "function") {
+      throw new Error("No se pudo cargar el complemento de tablas para el PDF.");
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(192, 21, 42);
+    doc.text("Politécnico Nuestra Señora de la Altagracia", 40, 42);
+
+    doc.setFontSize(10.5);
+    doc.setTextColor(60, 60, 60);
+    doc.text("Prueba diagnóstica - Módulo Análisis y Diseño de Reportes", 40, 58);
+    doc.text("Niveles alcanzados por estudiante - insumo para plan de mejora", 40, 72);
+
+    const hoy = new Date();
+    doc.setFontSize(9);
+    doc.setTextColor(130, 130, 130);
+    doc.text(`Generado el ${hoy.toLocaleDateString("es-DO")} a las ${hoy.toLocaleTimeString("es-DO")}`, 40, 86);
+
+    const filas = resultados.map(r => [r.nombre, r.fecha || "-", r.puntaje || "-", r.nivel || "-"]);
+
+    doc.autoTable({
+      startY: 100,
+      head: [["Estudiante", "Fecha", "Puntaje", "Nivel"]],
+      body: filas,
+      styles: { font: "helvetica", fontSize: 10, cellPadding: 6 },
+      headStyles: { fillColor: [10, 10, 10], textColor: [244, 244, 242], fontStyle: "bold" },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      didParseCell: (dataCell) => {
+        if (dataCell.section === "body" && dataCell.column.index === 3) {
+          const nivel = dataCell.cell.raw;
+          if (nivel === "Destacado") { dataCell.cell.styles.textColor = [154, 116, 0]; dataCell.cell.styles.fontStyle = "bold"; }
+          else if (nivel === "Notable") { dataCell.cell.styles.textColor = [176, 96, 0]; dataCell.cell.styles.fontStyle = "bold"; }
+          else if (nivel === "A mejorar") { dataCell.cell.styles.textColor = [192, 21, 42]; dataCell.cell.styles.fontStyle = "bold"; }
+        }
+      }
+    });
+
+    const finalY = doc.lastAutoTable.finalY + 20;
+    const totalDestacado = resultados.filter(r => r.nivel === "Destacado").length;
+    const totalNotable = resultados.filter(r => r.nivel === "Notable").length;
+    const totalMejorar = resultados.filter(r => r.nivel === "A mejorar").length;
+
+    doc.setFontSize(9.5);
+    doc.setTextColor(60, 60, 60);
+    doc.text(`Total evaluados: ${resultados.length}   -   Destacado: ${totalDestacado}   -   Notable: ${totalNotable}   -   A mejorar: ${totalMejorar}`, 40, finalY);
+
+    doc.save(`Niveles_PruebaDiagnostica_ADR_${hoy.toISOString().split("T")[0]}.pdf`);
+  } catch (err) {
+    console.error(err);
+    alert("Ocurrió un error al generar el PDF: " + err.message);
+  } finally {
+    boton.disabled = false;
+    boton.innerHTML = textoOriginal;
   }
 }
 </script>
