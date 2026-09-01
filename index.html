@@ -7,6 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --negro:#0A0A0A;
@@ -338,9 +340,15 @@
     padding:26px;
     width:100%;
     max-width:420px;
+    max-height:88vh;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
     animation:aparecer .18s ease;
   }
   .modal.modal-ancho{max-width:640px;}
+  .modal::-webkit-scrollbar{width:8px;}
+  .modal::-webkit-scrollbar-thumb{background:var(--gris-linea); border-radius:20px;}
+  .modal::-webkit-scrollbar-thumb:hover{background:var(--rojo);}
   @keyframes aparecer{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);}}
   .modal h3{
     font-family:var(--font-label);
@@ -507,7 +515,7 @@
       </label>
       <div class="acciones-docente">
         <button class="btn btn-docente" id="btn-buscar-estudiante"><i class="fa-solid fa-magnifying-glass"></i> Buscar estudiante</button>
-        <button class="btn btn-docente" id="btn-ver-resultados"><i class="fa-solid fa-chart-column"></i> Ver resultados</button>
+        <button class="btn btn-docente" id="btn-generar-pdf"><i class="fa-solid fa-file-pdf"></i> Generar PDF</button>
       </div>
     </div>
   </section>
@@ -664,7 +672,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("btn-siguiente").addEventListener("click", manejarSiguiente);
 
   $("btn-buscar-estudiante").addEventListener("click", () => abrirFlujoDocente("panel-buscar"));
-  $("btn-ver-resultados").addEventListener("click", () => abrirFlujoDocente("panel-resultados"));
+  $("btn-generar-pdf").addEventListener("click", () => {
+    callbackPin = () => {
+      cerrarOverlay("overlay-pin");
+      generarPdfNiveles();
+    };
+    abrirOverlayPin();
+  });
 
   document.querySelectorAll(".cerrar-modal").forEach(btn => {
     btn.addEventListener("click", () => cerrarOverlay(btn.dataset.cerrar));
