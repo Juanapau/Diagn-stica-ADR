@@ -179,6 +179,19 @@
   .lista-autocompletar .sin-resultado{color:var(--gris); cursor:default;}
   .lista-autocompletar .sin-resultado:hover{background:none;}
 
+  .aviso-duplicado{
+    display:flex; align-items:center; gap:9px;
+    margin-top:10px;
+    padding:11px 14px;
+    border:1px solid var(--rojo);
+    border-left:3px solid var(--rojo-brillo);
+    background:rgba(192,21,42,.14);
+    border-radius:6px;
+    font-size:14.5px;
+    color:#ffc2ca;
+  }
+  .aviso-duplicado i{color:var(--rojo-brillo); font-size:16px; flex-shrink:0;}
+
   .acciones-docente{
     display:flex; gap:10px; flex-wrap:wrap;
     margin-top:6px;
@@ -313,6 +326,10 @@
     display:flex; align-items:center; justify-content:center;
     margin:0 auto 18px;
     font-size:34px; color:#241a02;
+  }
+  .icono-check.icono-advertencia{
+    background:linear-gradient(135deg, var(--rojo-brillo), var(--rojo-oscuro));
+    color:#fff;
   }
   .vista-confirmacion h2{
     font-family:var(--font-display);
@@ -502,6 +519,10 @@
         <input type="text" id="input-nombre" name="nombre-estudiante-prueba-adr" autocomplete="off" spellcheck="false" placeholder="Escribe tu nombre...">
         <input type="text" style="position:absolute; opacity:0; height:0; width:0; pointer-events:none;" tabindex="-1" aria-hidden="true">
         <div class="lista-autocompletar" id="lista-autocompletar"></div>
+        <div class="aviso-duplicado oculto" id="aviso-duplicado">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <span>Ya existe un envío registrado con este nombre. Solo se permite una presentación por estudiante.</span>
+        </div>
       </div>
       <div class="campo">
         <label for="input-fecha">Fecha</label>
@@ -543,8 +564,8 @@
 
   <!-- ===================== VISTA 3: CONFIRMACIÓN ===================== -->
   <section id="vista-confirmacion" class="tarjeta vista-confirmacion oculto">
-    <div class="icono-check"><i class="fa-solid fa-check"></i></div>
-    <h2>¡Prueba enviada!</h2>
+    <div class="icono-check" id="icono-confirmacion"><i class="fa-solid fa-check"></i></div>
+    <h2 id="titulo-confirmacion">¡Prueba enviada!</h2>
     <p id="texto-confirmacion">Gracias por completar la prueba diagnóstica. Tus respuestas fueron registradas correctamente. Tu docente revisará los resultados.</p>
   </section>
 
@@ -643,6 +664,7 @@ const PREGUNTAS = [
    ========================================================================= */
 let listaEstudiantes = [];
 let nombreSeleccionado = "";
+let yaRealizado = false;
 let indiceActual = 0;
 let respuestasEstudiante = new Array(PREGUNTAS.length).fill(null);
 let callbackPin = null;
@@ -656,7 +678,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // Limpia el campo de nombre por si el navegador restauró un valor anterior (autofill/bfcache)
   $("input-nombre").value = "";
   nombreSeleccionado = "";
+  yaRealizado = false;
   $("input-nombre").classList.remove("valido");
+  $("aviso-duplicado").classList.add("oculto");
 
   $("input-fecha").value = new Date().toISOString().split("T")[0];
   cargarListaEstudiantes();
@@ -664,6 +688,7 @@ document.addEventListener("DOMContentLoaded", () => {
     nombreSeleccionado = nombre;
     $("input-nombre").value = nombre;
     $("input-nombre").classList.add("valido");
+    verificarEnvioPrevio(nombre);
     validarInicio();
   });
   configurarAutocompletar($("input-buscar-docente"), $("lista-autocompletar-docente"));
@@ -671,6 +696,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("input-nombre").addEventListener("input", () => {
     nombreSeleccionado = "";
+    yaRealizado = false;
+    $("aviso-duplicado").classList.add("oculto");
     $("input-nombre").classList.remove("valido");
     validarInicio();
   });
@@ -710,6 +737,8 @@ document.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("pageshow", () => {
   $("input-nombre").value = "";
   nombreSeleccionado = "";
+  yaRealizado = false;
+  $("aviso-duplicado").classList.add("oculto");
   $("input-nombre").classList.remove("valido");
   validarInicio();
 });
@@ -730,6 +759,25 @@ async function cargarListaEstudiantes() {
 
 function apiConfigurada() {
   return API_URL && !API_URL.includes("PEGA_AQUI");
+}
+
+/* =========================================================================
+   VERIFICAR SI EL ESTUDIANTE YA ENVIÓ LA PRUEBA — límite de un envío
+   ========================================================================= */
+async function verificarEnvioPrevio(nombre) {
+  $("aviso-duplicado").classList.add("oculto");
+  yaRealizado = false;
+  if (!apiConfigurada() || !nombre) { validarInicio(); return; }
+  try {
+    const res = await fetch(`${API_URL}?action=verificar&nombre=${encodeURIComponent(nombre)}`);
+    const data = await res.json();
+    yaRealizado = !!(data.ok && data.yaRealizado);
+    $("aviso-duplicado").classList.toggle("oculto", !yaRealizado);
+  } catch (err) {
+    console.warn("No se pudo verificar envíos previos:", err);
+  } finally {
+    validarInicio();
+  }
 }
 
 /* =========================================================================
@@ -769,13 +817,14 @@ function configurarAutocompletar(input, contenedorLista, alSeleccionar) {
 function validarInicio() {
   const nombreOk = nombreSeleccionado.length > 0 && $("input-nombre").value.trim() === nombreSeleccionado;
   const fechaOk = $("input-fecha").value.length > 0;
-  $("btn-iniciar").disabled = !(nombreOk && fechaOk);
+  $("btn-iniciar").disabled = !(nombreOk && fechaOk) || yaRealizado;
 }
 
 /* =========================================================================
    FLUJO DE LA PRUEBA
    ========================================================================= */
 function iniciarPrueba() {
+  if (yaRealizado) return; // salvaguarda: el botón ya debería estar deshabilitado en este caso
   indiceActual = 0;
   respuestasEstudiante = new Array(PREGUNTAS.length).fill(null);
   $("vista-inicio").classList.add("oculto");
@@ -863,11 +912,6 @@ async function finalizarPrueba() {
   };
 
   await enviarResultado(payload);
-
-  $("vista-prueba").classList.add("oculto");
-  $("vista-confirmacion").classList.remove("oculto");
-  $("texto-confirmacion").textContent =
-    `Gracias, ${nombreSeleccionado.split(" ")[0]}. Tus respuestas fueron registradas correctamente. Tu docente revisará los resultados de la prueba diagnóstica.`;
 }
 
 function calcularNivel(correctas) {
@@ -877,18 +921,57 @@ function calcularNivel(correctas) {
 }
 
 async function enviarResultado(payload) {
+  $("vista-prueba").classList.add("oculto");
+  $("vista-confirmacion").classList.remove("oculto");
+
   if (!apiConfigurada()) {
     console.warn("API no configurada — resultado no enviado:", payload);
+    mostrarConfirmacion("normal", payload.nombre);
     return;
   }
+
   try {
-    await fetch(API_URL, {
+    const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(payload)
     });
+    const data = await res.json();
+
+    if (data && data.ok === false && data.duplicado) {
+      mostrarConfirmacion("duplicado", payload.nombre);
+    } else if (data && data.ok === false) {
+      mostrarConfirmacion("error", payload.nombre, data.mensaje);
+    } else {
+      mostrarConfirmacion("normal", payload.nombre);
+    }
   } catch (err) {
     console.error("Error al enviar el resultado:", err);
+    mostrarConfirmacion("error", payload.nombre);
+  }
+}
+
+function mostrarConfirmacion(tipo, nombre, mensajeError) {
+  const icono = $("icono-confirmacion");
+  const titulo = $("titulo-confirmacion");
+  const texto = $("texto-confirmacion");
+  const primerNombre = (nombre || "").split(" ")[0] || "";
+
+  if (tipo === "duplicado") {
+    icono.className = "icono-check icono-advertencia";
+    icono.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+    titulo.textContent = "Envío no registrado";
+    texto.textContent = `${primerNombre}, ya existe un envío previo con tu nombre. Solo se permite una presentación por estudiante, por lo que estas respuestas no fueron guardadas. Si consideras que se trata de un error, comunícalo a tu docente.`;
+  } else if (tipo === "error") {
+    icono.className = "icono-check icono-advertencia";
+    icono.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i>`;
+    titulo.textContent = "No se pudo enviar";
+    texto.textContent = mensajeError || `Ocurrió un problema al registrar tus respuestas, ${primerNombre}. Por favor avisa a tu docente para verificar si tu prueba quedó guardada.`;
+  } else {
+    icono.className = "icono-check";
+    icono.innerHTML = `<i class="fa-solid fa-check"></i>`;
+    titulo.textContent = "¡Prueba enviada!";
+    texto.textContent = `Gracias, ${primerNombre}. Tus respuestas fueron registradas correctamente. Tu docente revisará los resultados de la prueba diagnóstica.`;
   }
 }
 
